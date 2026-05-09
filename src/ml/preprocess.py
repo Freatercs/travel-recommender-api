@@ -22,13 +22,24 @@ class DataLoader:
         # Загружаем
         self.df = pd.read_csv(self.file_path)
 
-        # Парсим координаты в отдельные колонки для удобства расчетов
+        # Очистка названий от кавычек
+        self.df['name'] = self.df['name'].str.strip(' "«»')
+
+        # Парсим координаты в отдельные колонки
         self.df['lon'], self.df['lat'] = zip(*self.df['geolocation'].map(self._parse_coords))
+
+        # --- ИСПРАВЛЕНИЕ ОШИБКИ 500 ---
+        # 1. Удаляем строки, где координаты не распознались (NaN)
+        self.df.dropna(subset=['lon', 'lat'], inplace=True)
+
+        # 2. Сбрасываем индексы, чтобы не было "дырок" (ОЧЕНЬ ВАЖНО для матричных вычислений!)
+        self.df.reset_index(drop=True, inplace=True)
+        # ------------------------------
 
         # Заполняем пустые типы, если они есть
         self.df['type'] = self.df['type'].fillna('unknown')
 
-        print(f"Загружено {len(self.df)} объектов.")
+        print(f"Загружено {len(self.df)} объектов с валидными координатами.")
         return self.df
 
     def get_regions(self):
