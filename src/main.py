@@ -1,16 +1,29 @@
-# This is a sample Python script.
+from fastapi import FastAPI, HTTPException
+from src.ml.preprocess import DataLoader
+from src.ml.model import RecommenderEngine
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
-
-
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
+app = FastAPI(title="Travel Recommender API")
+data_store = {}
 
 
-# Press the green button in the gutter to run the script.
-if __name__ == '__main__':
-    print_hi('PyCharm')
+@app.on_event("startup")
+async def startup_event():
+    # Загрузка данных
+    loader = DataLoader("data/raw/russian_tourist_attractions.csv")
+    df = loader.load_data()
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+    # Инициализация и "обучение" модели
+    engine = RecommenderEngine(df)
+    engine.build_model()
+
+    data_store["df"] = df
+    data_store["engine"] = engine
+
+
+@app.get("/recommend/{item_name}")
+def get_recommendations(item_name: str):
+    engine = data_store.get("engine")
+    recs = engine.recommend(item_name)
+    if not recs:
+        raise HTTPException(status_code=404, detail="Object not found or no recommendations")
+    return {"source": item_name, "recommendations": recs}
