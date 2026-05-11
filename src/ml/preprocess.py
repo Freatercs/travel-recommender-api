@@ -3,9 +3,9 @@ import re
 
 
 class DataLoader:
-    def __init__(self, file_path: str):
-        self.file_path = file_path
-        self.df = None
+    def __init__(self, attractions_path, hotels_path):
+        self.attractions_path = attractions_path
+        self.hotels_path = hotels_path
 
     def _parse_coords(self, coord_str):
         """Извлекает долготу и широту из строки (Decimal('...'), Decimal('...'))"""
@@ -18,9 +18,9 @@ class DataLoader:
             return None, None
         return None, None
 
-    def load_data(self):
+    def load_attractions(self):
         # Загружаем
-        self.df = pd.read_csv(self.file_path)
+        self.df = pd.read_csv(self.attractions_path)
 
         # Очистка названий от кавычек
         self.df['name'] = self.df['name'].str.strip(' "«»')
@@ -44,3 +44,35 @@ class DataLoader:
 
     def get_regions(self):
         return sorted(self.df['region'].unique().tolist())
+
+    def load_hotels(self):
+        # Читаем Excel
+        df = pd.read_excel(self.hotels_path)
+
+        # 1. Базовая очистка: переименовываем и оставляем только нужное
+        df = df.rename(columns={
+            'Название': 'name',
+            'X': 'lon',
+            'Y': 'lat',
+            'Населенный Пункт': 'city',
+            'Адрес': 'address',
+            'Сайт': 'website'
+        })
+
+        # 2. Удаляем записи, где нет координат (без них поиск невозможен)
+        df = df.dropna(subset=['lat', 'lon'])
+
+        # 3. Приводим координаты к чистому float (на случай, если там строки)
+        df['lat'] = pd.to_numeric(df['lat'], errors='coerce')
+        df['lon'] = pd.to_numeric(df['lon'], errors='coerce')
+
+        # 4. Заполняем пустоты в строковых полях, чтобы JSON не падал
+        df['website'] = df['website'].fillna('Сайт не указан')
+        df['address'] = df['address'].fillna('Адрес не указан')
+        df['city'] = df['city'].fillna('Неизвестно')
+
+        # 5. Сбрасываем индексы
+        df = df.reset_index(drop=True)
+
+        print(f"✅ База отелей загружена: {len(df)} объектов.")
+        return df[['name', 'city', 'lat', 'lon', 'address', 'website']]

@@ -40,6 +40,26 @@ class RecommenderEngine:
         self.similarity_matrix = cosine_similarity(encoded_features)
         print(f"Модель обучена. Размер матрицы сходства: {self.similarity_matrix.shape}")
 
+    def find_nearby_hotels(self, hotels_df, target_lat, target_lon, radius_km=5.0):
+        nearby = []
+
+        for _, hotel in hotels_df.iterrows():
+            # Используем твой существующий метод расчета расстояния
+            dist = self._haversine_distance(target_lon, target_lat, hotel['lon'], hotel['lat'])
+
+            if dist <= radius_km:
+                nearby.append({
+                    "name": hotel['name'],
+                    "address": hotel['address'],
+                    "distance_km": round(dist, 2),
+                    "website": hotel['website'],
+                    "lat": hotel['lat'],
+                    "lon": hotel['lon']
+                })
+
+        # Сортируем: сначала самые близкие
+        return sorted(nearby, key=lambda x: x['distance_km'])
+
     def recommend(self, target_name: str, top_n: int = 5, distance_weight: float = 0.3):
         """
         Гибридная рекомендация: учитывает сходство типов и географическую близость.
