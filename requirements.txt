@@ -5,3 +5,7 @@ scikit-learn
 pydantic
 sqlalchemy
 psycopg2-binary
+streamlit
+requests
+pydeck
+numpy

@@ -35,13 +35,16 @@ def get_wiki_info(name):
     """Получает краткое описание и ссылку из Википедии"""
     # Кодируем название для URL
     encoded_name = urllib.parse.quote(name)
-    # Используем API мобильной версии (она быстрее и возвращает чистый текст)
-    url = f"https://en.wikipedia.org/wiki/{encoded_name}"
+    url = f"https://ru.wikipedia.org/wiki/{encoded_name}"
     print(url)
+    #https://en.wikipedia.org/wiki/Blagoveshchensk_State_Pedagogical_University
+    #https://ru.wikipedia.org/wiki/Blagoveshchensk%20State%20Pedagogical%20University
 
     try:
-        response = requests.get(url, timeout=2)  # Таймаут, чтобы не вешать приложение
+        response = requests.get(url, timeout=5)  # Таймаут, чтобы не вешать приложение
+        print(response.status_code)
         if response.status_code == 200:
+            print(response.json())
             data = response.json()
             return {
                 "summary": data.get("extract", "Описание отсутствует"),
@@ -167,43 +170,45 @@ else:
                         df_attractions = pd.DataFrame(st.session_state.recs)
                         df_grouped = df_attractions.groupby(['lat', 'lon']).agg({
                             'name': lambda x: '<br/>• '.join(x),  # Создаем список с буллитами
-                            'type': 'first',  # Берем первый тип для краткости
+                            'type': 'first',
                             'region': 'first'
                         }).reset_index()
 
-                        # Добавляем префикс к именам для красоты
-                        df_grouped['name_list'] = '• ' + df_grouped['name']
+                        # Добавляем HTML для тултипа достопримечательностей
+                        df_grouped['tooltip_text'] = '🏛️ <b>Достопримечательности:</b><br/>• ' + df_grouped['name']
+
                         df_hotels_map = pd.DataFrame(hotels)
 
-                        # Добавляем категории для тултипа
-                        df_attractions['category'] = 'Достопримечательность'
-                        df_hotels_map['category'] = 'Отель'
+                        # Добавляем HTML для тултипа отелей
+                        df_hotels_map['tooltip_text'] = '🏨 <b>' + df_hotels_map['name'] + '</b><br/>📍 ' + df_hotels_map[
+                            'address'] + '<br/>📏 ' + df_hotels_map['distance_km'].round(1).astype(str) + ' км'
 
                         # Слой достопримечательностей (красные точки)
                         attractions_layer = pdk.Layer(
                             "ScatterplotLayer",
-                            df_grouped,
+                            data=df_grouped,
                             get_position=["lon", "lat"],
                             get_color=[220, 30, 0, 160],
-                            get_radius=80,  # Можно чуть увеличить радиус, так как там много объектов
+                            get_radius=80,
                             radius_min_pixels=6,
                             pickable=True,
+                            auto_highlight=True,
                         )
 
                         # Слой отелей (синие точки)
                         hotels_layer = pdk.Layer(
                             "ScatterplotLayer",
-                            df_hotels_map,
+                            data=df_hotels_map,
                             get_position=["lon", "lat"],
-                            get_color=[0, 120, 255, 200],  # Синий
+                            get_color=[0, 120, 255, 200],
                             get_radius=50,
                             radius_min_pixels=6,
                             radius_max_pixels=15,
                             pickable=True,
+                            auto_highlight=True,
                         )
 
                         # Настройка камеры (центрируемся на выбранном месте)
-                        # Чем больше радиус, тем меньше зум
                         dynamic_zoom = 14 - (hotel_radius / 10)
                         view_state = pdk.ViewState(
                             latitude=selected_rec['lat'],
@@ -212,17 +217,24 @@ else:
                             pitch=45,
                         )
 
-                        # Отрисовка карты PyDeck
-                        st.pydeck_chart(pdk.Deck(
+                        # Отрисовка карты PyDeck с правильным tooltip
+                        deck = pdk.Deck(
                             layers=[attractions_layer, hotels_layer],
                             initial_view_state=view_state,
                             map_style=None,
                             tooltip={
-                                # В html используем {name_list}, где уже лежат все названия через <br/>
-                                "html": "<b>Объекты в этой точке:</b><br/>{name_list}",
-                                "style": {"color": "white", "backgroundColor": "#2c3e50"}
+                                "html": "<div style='background-color: #2c3e50; padding: 8px; border-radius: 4px; max-width: 300px;'>"
+                                        "{tooltip_text}"
+                                        "</div>",
+                                "style": {
+                                    "color": "white",
+                                    "backgroundColor": "rgba(0,0,0,0)",
+                                    "fontSize": "12px"
+                                }
                             }
-                        ))
+                        )
+
+                        st.pydeck_chart(deck)
                     else:
                         st.warning(
                             f"В радиусе {hotel_radius} км отелей не найдено. Попробуйте увеличить радиус в боковом меню.")
