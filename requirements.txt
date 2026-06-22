@@ -3,9 +3,14 @@ uvicorn[standard]
 pandas
 scikit-learn
 pydantic
+email-validator
 sqlalchemy
 psycopg2-binary
+bcrypt>=4.0,<5
+python-jose[cryptography]
 streamlit
 requests
 pydeck
 numpy
+g4f
+nest-asyncio
