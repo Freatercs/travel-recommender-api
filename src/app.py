@@ -13,45 +13,116 @@ st.title("Интеллектуальная система туристическ
 st.subheader("Настройте параметры поиска:")
 df_all = pd.read_csv("data/raw/russian_tourist_attraction_ru.csv")
 
-# Создаем два аккуратных столбца для фильтров ДО кнопки поиска
-col_filter1, col_filter2 = st.columns(2)
+unique_cities = df_all["locality"].dropna().unique().tolist()
+unique_cities = [c for c in unique_cities if str(c).strip() != ""]
+city_options = ["Все города"] + sorted(unique_cities)
 
-with col_filter1:
-    # Собираем уникальные города (locality) из ВСЕГО датасета
-    unique_cities = df_all['locality'].dropna().unique().tolist()
-    unique_cities = [c for c in unique_cities if str(c).strip() != '']
-    city_options = ["Все города"] + sorted(unique_cities)
-
-    selected_city = st.selectbox("🎯 Выберите город/локацию:", city_options)
-
-with col_filter2:
-    # Собираем уникальные типа объектов (type) из ВСЕГО датасета
-    unique_types = df_all['type'].dropna().unique().tolist()
-    unique_types = [t for t in unique_types if str(t).strip() != '']
-    type_options = ["Все типы"] + sorted(unique_types)
-
-    selected_type = st.selectbox("🏛️ Тип достопримечательности:", type_options)
+unique_types = df_all["type"].dropna().unique().tolist()
+unique_types = [t for t in unique_types if str(t).strip() != ""]
+type_options = ["Все типы"] + sorted(unique_types)
 
 
+def _option_index(options: list, value: str) -> int:
+    try:
+        return options.index(value)
+    except ValueError:
+        return 0
 
+
+def _init_applied_filters():
+    defaults = {
+        "applied_city": "Все города",
+        "applied_type": "Все типы",
+        "applied_top_n": 5,
+        "applied_dist_weight": 0.3,
+    }
+    for key, val in defaults.items():
+        if key not in st.session_state:
+            st.session_state[key] = val
+
+
+_init_applied_filters()
+
+with st.form("main_filters", clear_on_submit=False):
+    col_filter1, col_filter2 = st.columns(2)
+    with col_filter1:
+        form_city = st.selectbox(
+            "🎯 Выберите город/локацию:",
+            city_options,
+            index=_option_index(city_options, st.session_state.applied_city),
+        )
+    with col_filter2:
+        form_type = st.selectbox(
+            "🏛️ Тип достопримечательности:",
+            type_options,
+            index=_option_index(type_options, st.session_state.applied_type),
+        )
+    apply_filters = st.form_submit_button("Применить фильтры", use_container_width=True)
+
+if apply_filters:
+    filters_changed = (
+        form_city != st.session_state.applied_city
+        or form_type != st.session_state.applied_type
+    )
+    st.session_state.applied_city = form_city
+    st.session_state.applied_type = form_type
+    if filters_changed and st.session_state.get("recs_source") != "anchor":
+        st.session_state.recs = None
+        st.session_state.discover_key = None
+        st.session_state.hotels = None
+
+selected_city = st.session_state.applied_city
+selected_type = st.session_state.applied_type
+
+st.caption(
+    f"Активные фильтры: **{selected_city}** · **{selected_type}** "
+    "(измените значения и нажмите «Применить фильтры»)"
+)
 # URL FastAPI сервера
 API_URL = "http://127.0.0.1:8000"
 HOTELS_PER_PAGE = 10
 
 st.sidebar.header("⚙️ Настройки поиска")
 
-# Слайдер для радиуса отелей
+# Слайдер для радиуса отелей (не влияет на рекомендации)
 hotel_radius = st.sidebar.slider(
     "Радиус поиска отелей (км)",
     min_value=1,
     max_value=30,
     value=5,
-    step=1
+    step=1,
 )
 
-# Настройки рекомендаций достопримечательностей
-dist_weight = st.sidebar.slider("Вес географии (достопримечательности)", 0.0, 1.0, 0.3)
-top_n = st.sidebar.number_input("Количество рекомендаций", 1, 20, 5)
+with st.sidebar.form("rec_settings", clear_on_submit=False):
+    st.markdown("**Рекомендации**")
+    form_dist_weight = st.slider(
+        "Вес географии (достопримечательности)",
+        0.0,
+        1.0,
+        float(st.session_state.applied_dist_weight),
+    )
+    form_top_n = st.number_input(
+        "Количество рекомендаций",
+        1,
+        20,
+        int(st.session_state.applied_top_n),
+    )
+    apply_settings = st.form_submit_button("Применить настройки", use_container_width=True)
+
+if apply_settings:
+    settings_changed = (
+        form_dist_weight != st.session_state.applied_dist_weight
+        or int(form_top_n) != int(st.session_state.applied_top_n)
+    )
+    st.session_state.applied_dist_weight = form_dist_weight
+    st.session_state.applied_top_n = int(form_top_n)
+    if settings_changed and st.session_state.get("recs_source") != "anchor":
+        st.session_state.recs = None
+        st.session_state.discover_key = None
+        st.session_state.hotels = None
+
+dist_weight = st.session_state.applied_dist_weight
+top_n = st.session_state.applied_top_n
 
 
 def auth_headers() -> dict:
@@ -243,13 +314,13 @@ else:
 
 
 def get_llm_info(name: str, locality: str = "") -> dict:
-    """
-    получение данных через OpenStreetMap (Nominatim)
-    без ключей и лимитов. Ссылка ведет на Яндекс Карты.
-    """
+    """Описание и ссылка на карту (Nominatim + Яндекс Карты)."""
     search_query = f"{locality} {name}".strip()
+    return get_llm_info_cached(search_query, locality)
 
-    # Ссылка на Яндекс Карты
+
+@st.cache_data(ttl=60 * 60 * 24 * 7, show_spinner=False)
+def get_llm_info_cached(search_query: str, locality: str = "") -> dict:
     yandex_maps_url = f"https://yandex.ru/maps/?text={urllib.parse.quote(search_query)}"
 
     try:
@@ -259,15 +330,13 @@ def get_llm_info(name: str, locality: str = "") -> dict:
             "format": "json",
             "addressdetails": 1,
             "limit": 1,
-            "accept-language": "ru"
+            "accept-language": "ru",
         }
-
-        headers = {'User-Agent': 'TravelRecommenderBot/1.0 (student_project@university.edu)'}
+        headers = {"User-Agent": "TravelRecommenderBot/1.0 (student_project@university.edu)"}
         response = requests.get(url, params=params, headers=headers, timeout=4)
 
         if response.status_code == 200:
             data = response.json()
-
             if data:
                 result = data[0]
                 address_info = result.get("address", {})
@@ -296,23 +365,23 @@ def get_llm_info(name: str, locality: str = "") -> dict:
                     "theatre": "Театр",
                     "castle": "Замок / Крепость",
                     "park": "Парк / Сквер",
-                    "attraction": "Достопримечательность"
+                    "attraction": "Достопримечательность",
                 }
 
                 ru_type = type_mapping.get(osm_type, type_mapping.get(osm_class, "Достопримечательность"))
                 summary = f"📍 {full_address} | 🏛️ Категория: {ru_type}"
 
-                return {
-                    "summary": summary,
-                    "url": yandex_maps_url
-                }
+                return {"summary": summary, "url": yandex_maps_url}
 
     except Exception as e:
-        print(f"[OSM Error] Ошибка геокодирования для {name}: {e}")
+        print(f"[OSM Error] Ошибка геокодирования для {search_query}: {e}")
 
     return {
-        "summary": f"📍 Локация: {locality if locality else 'Россия'} | 🏛️ Тип: Исторический объект. Подробный адрес и отзывы смотрите на картах.",
-        "url": yandex_maps_url
+        "summary": (
+            f"📍 Локация: {locality if locality else 'Россия'} | "
+            f"🏛️ Тип: Исторический объект. Подробный адрес и отзывы смотрите на картах."
+        ),
+        "url": yandex_maps_url,
     }
 
 
@@ -649,24 +718,6 @@ else:
     )
     refresh_discover = st.session_state.pop("refresh_discover_pending", False)
 
-    anchor_params_changed = (
-        st.session_state.recs_source == "anchor"
-        and st.session_state.recs is not None
-        and (
-            st.session_state.search_city != selected_city
-            or st.session_state.search_type != selected_type
-            or st.session_state.search_object != selected_object
-            or st.session_state.search_dist_weight != dist_weight
-            or st.session_state.search_top_n != top_n
-        )
-    )
-
-    if anchor_params_changed:
-        st.info("🔄 Параметры персонального маршрута изменились. Нажмите кнопку выше, чтобы обновить.")
-        st.session_state.recs = None
-        st.session_state.recs_source = None
-        st.session_state.hotels = None
-
     need_auto_recs = (
         st.session_state.recs_source != "anchor"
         and (
@@ -735,6 +786,24 @@ else:
                         st.session_state.hotels = None
             else:
                 st.error(f"Ошибка при получении данных (Код: {response.status_code})")
+
+    anchor_params_changed = (
+        st.session_state.recs_source == "anchor"
+        and st.session_state.recs is not None
+        and (
+            st.session_state.search_city != selected_city
+            or st.session_state.search_type != selected_type
+            or st.session_state.search_object != selected_object
+            or st.session_state.search_dist_weight != dist_weight
+            or st.session_state.search_top_n != top_n
+        )
+    )
+
+    if anchor_params_changed:
+        st.info(
+            "🔄 Фильтры или якорь изменились. Нажмите «Сформировать персональный маршрут», "
+            "чтобы обновить результаты."
+        )
 
     if st.session_state.recs:
         if st.session_state.recs_source == "anchor":
@@ -833,10 +902,6 @@ else:
         selected_rec_name = st.selectbox("Выберите достопримечательность, чтобы найти отели рядом:", rec_names)
         selected_rec = next(r for r in st.session_state.recs if r['name'] == selected_rec_name)
 
-        # === ПРОВЕРКА ИЗМЕНЕНИЯ РАДИУСА ОТЕЛЕЙ ===
-        if st.session_state.search_hotel_radius != hotel_radius:
-            st.warning("📏 Радиус изменен в меню. Нажмите кнопку ниже, чтобы обновить карту отелей.")
-
         # Кнопка поиска отелей
         if st.button(f"Найти отели в радиусе {hotel_radius} км"):
             st.session_state.search_hotel_radius = hotel_radius
@@ -854,6 +919,9 @@ else:
                     st.session_state.hotels_page = 1
                 else:
                     st.error("Ошибка API при поиске отелей.")
+
+        if st.session_state.search_hotel_radius != hotel_radius:
+            st.warning("📏 Радиус изменен в меню. Нажмите кнопку ниже, чтобы обновить карту отелей.")
 
         if st.session_state.hotels is not None:
             hotels = st.session_state.hotels

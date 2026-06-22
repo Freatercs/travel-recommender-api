@@ -5,3 +5,5 @@ __pycache__/
 data/raw/*.csv
 models/*.pkl
 .env
+data/*.db
+data/*.db-journal
